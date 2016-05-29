@@ -1,0 +1,138 @@
+/*
+ * Server.cpp
+ *
+ *  Created on: May 24, 2016
+ *      Author: petar
+ */
+#include <iostream>
+#include <csignal>
+#include <thread>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <vector>
+#include <stdlib.h>
+#include <mutex>
+using namespace std;
+int portnumber = 6666;
+void *connection_handler(void *socket_desc);
+void write_message(int sock, const char * message);
+void search_game(int sock, int choice);
+void create_game(int sock, int choice);
+
+struct Game {
+	char name[30], ip[10];
+	int port;
+};
+std::vector<Game> allgames;
+int sockfd;
+void signal_handler(int sig) {
+	if (sig == SIGINT) {
+		close(sockfd);
+	}
+}
+
+int main(int argc, char *argv[]) {
+	if (signal(SIGINT, signal_handler) == SIG_ERR) {
+		cout << "An error occurred while setting a signal handler.\n" << endl;
+	}
+	int newsockfd;
+	struct sockaddr_in serv_addr, cli_addr;
+	socklen_t clilen;
+	sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (sockfd < 0) {
+		std::cout << "ERROR opening the socket";
+		exit(1);
+	}
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_addr.s_addr = INADDR_ANY;
+	serv_addr.sin_port = htons(25000);
+	if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+		std::cout << "Error on binding";
+		exit(1);
+	}
+	listen(sockfd, 50);
+	clilen = sizeof(cli_addr);
+	cout << " before accept" << endl;
+	std::thread * t1 = NULL;
+	while (newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) {
+		if (newsockfd < 0) {
+			cout << "Error on connecting the client!";
+			exit(1);
+		}
+		puts("Connection accepted");
+		t1 = new thread(connection_handler, (void*) &newsockfd);
+	}
+	return 0;
+}
+void *connection_handler(void *socket_desc) {
+	mutex threadpool;
+	int sock = *(int*) socket_desc;
+	cout << "NEW CLIENT" << endl;
+	char message[9];
+	strcpy(message, "Welcome!");
+	int choice = 2;
+	write(sock, message, strlen(message) + 1);
+	if (allgames.size() > 0) {
+		choice = 1;
+		search_game(sock, choice);
+	} else {
+		choice = 0;
+		threadpool.lock();
+		create_game(sock, choice);
+		threadpool.unlock();
+	}
+	return NULL;
+}
+
+void search_game(int sock, int choice) {
+	const char * message1 = " Choose between to be player or a host.";
+	write_message(sock, message1);
+	write(sock, &choice, sizeof(int));
+	long length = allgames.size();
+	write(sock, &length, sizeof(long));
+	for (size_t i = 0; i < allgames.size(); ++i) {
+		int sizeofelement = sizeof(allgames[i].name);
+		write(sock, &sizeofelement, sizeof(int));
+		write(sock, allgames[i].name, sizeofelement + 1);
+		cout << allgames[i].name << endl;
+	}
+	int sizeofchosengame;
+	read(sock, &sizeofchosengame, sizeof(int));
+	char *nameofthegame = (char *) malloc(sizeofchosengame);
+	read(sock, &nameofthegame, sizeofchosengame);
+	Game game;
+	for (size_t i = 0; i < allgames.size(); i++) {
+		if (strcmp(allgames[i].name, nameofthegame) == 0) {
+			strcpy(game.name, allgames[i].name);
+			strcpy(game.ip, allgames[i].ip);
+			game.port = allgames[i].port;
+			allgames.erase(allgames.begin() + (i - 1));
+		}
+	}
+	write(sock, &game, sizeof(game));
+}
+
+void create_game(int sock, int choice) {
+	const char * message1 =
+			" Have to Create a room because there is no other players.";
+	write_message(sock, message1);
+	write(sock, &choice, sizeof(choice));
+	Game game;
+	read(sock, &game, sizeof(game));
+	portnumber++;
+	game.port = portnumber;
+	allgames.push_back(game);
+	cout << game.name << endl;
+	cout << game.ip << endl;
+	cout << game.port << endl;
+}
+
+void write_message(int sock, const char * message) {
+	int size = strlen(message);
+	write(sock, &size, sizeof(size));
+	write(sock, message, strlen(message) + 1);
+}
+

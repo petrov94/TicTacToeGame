@@ -1,0 +1,361 @@
+/*
+ * CLient.cpp
+ *
+ *  Created on: May 24, 2016
+ *      Author: petar
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <stdlib.h>
+#include <vector>
+#include <sys/unistd.h>
+#include <arpa/inet.h>
+using namespace std;
+char * host_getIP();
+void init_matrix(void);
+void disp_matrix(void);
+void get_player_move(void);
+char check(void);
+void secondPlayerAction(int sockfd);
+struct Game {
+	char name[30], ip[30];
+	int port;
+};
+Game creategameconnection(int sockfd);
+int portnumber = 6666;
+std::vector<char*> allgames;
+char matrix[3][3];
+Game * create_game(int sockfd);
+Game * create_game(int sockfd) {
+	printf("IP address: %s\n", "HEREEEEEEEEE");
+	printf("%s\n", "Enter a name of the game:");
+	char name[30];
+	scanf("%s", name);
+	Game * game = new Game;
+	strcpy(game->name, name);
+	char * ipfrom = host_getIP();
+	if (ipfrom == NULL)
+		printf("%s", "Cannot get IP address of a client\n");
+	strcpy(game->ip, ipfrom);
+	printf("IP address: %s\n", ipfrom);
+	portnumber++;
+	write(sockfd, &game, sizeof(game));
+	free(ipfrom);
+	printf("Game is created. Waiting for another player.\n");
+	close(sockfd);
+	return game;
+}
+
+int create_player_connection(int serversocket) {
+	int newsockfd;
+	struct sockaddr_in serv_addr, cli_addr;
+	socklen_t clilen;
+	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (sockfd < 0) {
+		printf("ERROR opening the socket");
+		exit(1);
+	}
+	Game * game = create_game(serversocket);
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_addr.s_addr = atoi(game->ip);
+	serv_addr.sin_port = htons(portnumber);
+	if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+		printf("Error on binding");
+		exit(1);
+	}
+	listen(sockfd, 6);
+	clilen = sizeof(cli_addr);
+	newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
+	if (newsockfd < 0) {
+		printf("Error on connecting the client!");
+		exit(1);
+	}
+	free(game);
+	return newsockfd;
+}
+
+void play(int newsockfd) {
+	char message[9];
+	strcpy(message, "Welcome!");
+	write(newsockfd, message, strlen(message) + 1);
+	system("clear");
+	printf("WELCOME");
+	printf("The game of Tic Tac Toe. Start NOW.\n");
+	init_matrix();
+	char done = ' ';
+	do {
+		disp_matrix();
+		get_player_move(); //shte getva na purviq hoda
+		done = check();
+		if (done != ' ')
+			break;
+		int corrbyx, corrbyy;
+		read(newsockfd, &corrbyx, sizeof(int));
+		read(newsockfd, &corrbyy, sizeof(int));
+		matrix[corrbyx][corrbyy] = 'O';
+	} while (done == ' ');
+	int win = 0;
+	if (done == 'X') {
+		printf("YOU LOOOOOSE");
+		win = 1;
+	} else
+		printf("YOU WINNNNN");
+	write(newsockfd, &win, sizeof(int));
+}
+
+int main(int argc, char *argv[]) {
+	int sockfd, n;
+	struct sockaddr_in serv_addr;
+	struct hostent *server;
+	sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (sockfd < 0) {
+		printf("%s", "ERROR opening the socket");
+		exit(1);
+	}
+	server = gethostbyname("127.0.1.1");
+	if (server == NULL) {
+		printf("%s", "ERROR, no such host\n");
+		exit(1);
+	}
+	bzero((char *) &serv_addr, sizeof(serv_addr));
+	serv_addr.sin_family = AF_INET;
+	bcopy((char *) server->h_addr,
+	(char *)&serv_addr.sin_addr.s_addr,
+	server->h_length);
+	serv_addr.sin_port = htons(25000);
+	if (connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr))
+			< 0) {
+		printf("%s", "ERROR, no such host\n");
+		exit(1);
+	}
+	char buffer[10];
+	bzero(buffer, 10);
+	n = read(sockfd, buffer, 10); //WELCOME!
+	if (n < 0)
+		printf("%s", "ERROR reading from socket\n");
+	fflush(stdin);
+	printf("%s\n", buffer);
+	int size;
+	read(sockfd, &size, sizeof(int));
+	char *message1;
+	message1 = (char *) malloc(size);
+	read(sockfd, message1, size); //CHO
+	printf("%s\n", message1);
+	free(message1);
+	int choice;
+	n = read(sockfd, &choice, sizeof(int));
+	if (n < 0) {
+		printf("ERROR reading from socket - CHOICE\n");
+	}
+	printf("%d\n", choice);
+	if (choice == 0) {
+		int newsockfd = create_player_connection(sockfd);
+		/*play*/
+		play(newsockfd);
+	} else if (choice == 1 || choice == 256) {
+		int mychoice;
+		printf("%s\n", "For player press-1 , For host press-2");
+		scanf("%d", &mychoice);
+		if (mychoice == 1) {
+			Game game = creategameconnection(sockfd);
+			printf("%s\n", game.ip);
+			int sockfdnew;
+			struct sockaddr_in serv_addr;
+			struct hostent *server;
+			sockfdnew = socket(AF_INET, SOCK_STREAM, 0);
+			if (sockfdnew < 0) {
+				printf("%s", "ERROR opening the socket");
+				exit(1);
+			}
+			server = gethostbyname(game.ip);
+			if (server == NULL) {
+				printf("%s", "ERROR, no such host\n");
+				exit(1);
+			}
+			bzero((char *) &serv_addr, sizeof(serv_addr));
+			serv_addr.sin_family = AF_INET;
+			bcopy((char *) server->h_addr,
+			(char *)&serv_addr.sin_addr.s_addr,
+			server->h_length);
+			serv_addr.sin_port = htons(game.port);
+			if (connect(sockfdnew, (struct sockaddr *) &serv_addr,
+					sizeof(serv_addr)) < 0) {
+				printf("%s", "ERROR, no such host\n");
+				exit(1);
+			}
+			secondPlayerAction(sockfdnew);
+		} else {
+			int newsockfd = create_player_connection(sockfd);
+			/*play*/
+			play(newsockfd);
+		}
+	}
+	return 0;
+}
+void secondPlayerAction(int sockfd) {
+	int n;
+	char buffer[10];
+	bzero(buffer, 10);
+	n = read(sockfd, buffer, 10); //WELCOME!
+	if (n < 0)
+		printf("%s", "ERROR reading from socket\n");
+	fflush(stdin);
+	printf("%s\n", buffer);
+	char done = ' ';
+	do {
+		disp_matrix();
+		int x, y;
+		printf("Enter X,Y coordinates for your move: ");
+		scanf("%d%*c%d", &x, &y);
+
+		x--;
+		y--;
+		while ((x < 1 && x > 3) || (y < 1 && y > 3)) {
+			printf("ENTER A NUMBER BETWEEN 1 AND 3");
+			printf("Enter X,Y coordinates for your move: ");
+			scanf("%d%*c%d", &x, &y);
+			x--;
+			y--;
+		}
+		write(sockfd, &x, sizeof(int));
+		write(sockfd, &y, sizeof(int));
+		done = check();
+	} while (done == ' ');
+	int win;
+	read(sockfd, &win, sizeof(int));
+	if (win == 1)
+		printf("YOU WINNNNN");
+	else
+		printf("YOU LOOOOOOSE");
+}
+Game creategameconnection(int sockfd) {
+	long sizeofvec = 0;
+	read(sockfd, &sizeofvec, sizeof(long));
+	for (int i = 0; i < sizeofvec; ++i) {
+		int sizeofelement;
+		read(sockfd, &sizeofelement, sizeof(int));
+		char *nameofthegame;
+		nameofthegame = (char *) malloc(sizeofelement);
+		read(sockfd, nameofthegame, sizeofelement);
+		printf("game %s number %d\n", nameofthegame, i + 1);
+		allgames.push_back(nameofthegame);
+	}
+	int gamenumber;
+	printf("Enter a number refereed to a game\n");
+	fflush(stdin);
+	scanf("%d", &gamenumber);
+	gamenumber--;
+	printf("%s", allgames[gamenumber]);
+	char *choicengame = (char *) malloc(
+			sizeof(char) * strlen(allgames[gamenumber]) + 1);
+	strcpy(choicengame, allgames[gamenumber]);
+	int size = strlen(choicengame) * sizeof(char);
+	write(sockfd, &size, sizeof(int));
+	write(sockfd, &choicengame, size);
+	free(choicengame);
+	Game tmpgame;
+	read(sockfd, &tmpgame, sizeof(tmpgame));
+	return tmpgame;
+}
+void select_game(int sockfd) {
+	long sizeofvec = 0;
+	read(sockfd, &sizeofvec, sizeof(long));
+	for (int i = 0; i < sizeofvec; ++i) {
+		int sizeofelement;
+		read(sockfd, &sizeofelement, sizeof(int));
+		char *nameofthegame;
+		nameofthegame = (char *) malloc(sizeofelement);
+		read(sockfd, nameofthegame, sizeofelement);
+		printf("game %s number %d\n", nameofthegame, i + 1);
+		allgames.push_back(nameofthegame);
+	}
+	int gamenumber;
+	printf("Enter a number refereed to a game\n");
+	fflush(stdin);
+	gamenumber--;
+	scanf("%d", &gamenumber);
+	printf("%s", allgames[gamenumber]);
+	char *choicengame = (char *) malloc(
+			sizeof(char) * strlen(allgames[gamenumber]) + 1);
+	strcpy(choicengame, allgames[gamenumber]);
+	int size = strlen(choicengame) * sizeof(char);
+	write(sockfd, &size, sizeof(int));
+	write(sockfd, &choicengame, size);
+	free(choicengame);
+}
+
+void init_matrix(void) {
+	int i, j;
+
+	for (i = 0; i < 3; i++)
+		for (j = 0; j < 3; j++)
+			matrix[i][j] = ' ';
+}
+void disp_matrix(void) {
+	int t;
+
+	for (t = 0; t < 3; t++) {
+		printf(" %c | %c | %c ", matrix[t][0], matrix[t][1], matrix[t][2]);
+		if (t != 2)
+			printf("\n---|---|---\n");
+	}
+	printf("\n");
+}
+void get_player_move(void) {
+	int x, y;
+
+	printf("Enter X,Y coordinates for your move: ");
+	scanf("%d%*c%d", &x, &y);
+
+	x--;
+	y--;
+
+	if (matrix[x][y] != ' ') {
+		printf("ENTER A NUMBER BETWEEN 1 AND 3");
+		get_player_move();
+	} else
+		matrix[x][y] = 'X';
+}
+char check(void) {
+	int i;
+
+	for (i = 0; i < 3; i++) /* check rows */
+		if (matrix[i][0] == matrix[i][1] && matrix[i][0] == matrix[i][2])
+			return matrix[i][0];
+
+	for (i = 0; i < 3; i++) /* check columns */
+		if (matrix[0][i] == matrix[1][i] && matrix[0][i] == matrix[2][i])
+			return matrix[0][i];
+
+	/* test diagonals */
+	if (matrix[0][0] == matrix[1][1] && matrix[1][1] == matrix[2][2])
+		return matrix[0][0];
+
+	if (matrix[0][2] == matrix[1][1] && matrix[1][1] == matrix[2][0])
+		return matrix[0][2];
+
+	return ' ';
+}
+char * host_getIP() {
+	char hostname[128];
+	char * ip;
+	ip = (char *) malloc(15);
+	struct hostent *he;
+
+	gethostname(hostname, sizeof hostname);
+
+	he = gethostbyname(hostname);
+
+	if (he == NULL) { // do some error checking
+		herror("gethostbyname"); // herror(), NOT perror()
+		return NULL;
+	}
+	strcpy(ip, inet_ntoa(*(struct in_addr*) he->h_addr));
+	return ip;
+}
+
